@@ -1,0 +1,80 @@
+* Activar opción para archivos grandes de Excel
+set excelxlsxlargefile on
+
+* Importar el archivo Excel
+import excel using "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx\usu_individual_T124.xlsx", clear firstrow sheet("usu_individual_T124") case(lower)
+
+* Guardar la base en formato .dta
+save "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx\usu_individual_T124.dta", replace
+
+* Cambiar el directorio de trabajo (opcional)
+cd "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx"
+
+*"Pulo" la base
+
+destring deccfr, replace
+
+*La variable deccfr es el numero de decil del ingreso per capita familiar; el comando destring lo que hace es transformar una variable de formato texto a formato numerico
+
+drop if (deccfr < 1 | deccfr > 10)
+
+*Dado que 00 = sin ingresos, 12 = no respuesta, 13 = entrevista individual no realizada, todos estos datos los voy a quitar de la base para no tener empty values
+
+
+
+*Genero una variable de edad, el comando de edad en la encuesta del INDEC esta vinculada con el codigo ch06
+
+generate edad=ch06 
+
+replace edad = 0 if edad == -1  
+
+*Aunque  ya  "limpie" la base, tambien debo no considerar los datos de aquellas personas que no respondieron (idem a lo realizado arriba), utilizando la variable estado
+
+drop if estado == 0 
+ 
+*Voy a etiquetar  la variable region con el comando label
+
+label define labelregion 1 "GBA" 40 "NOA" 41 "NEA" 42 "Cuyo" 43 "Pampeana" 44 "Patagonica"
+
+label values region labelregion 
+
+* Asegúrate de que los datos estén ordenados por región
+sort region
+
+* 1. Proporción de hombres y mujeres
+gen hombre = (ch04 == 1) // Asumiendo 1 = varón
+gen mujer = (ch04 == 2) // Asumiendo 2 = mujer
+
+* Calcular proporciones por región
+by region: egen total_hombres = total(hombre)
+by region: egen total_mujeres = total(mujer)
+by region: egen total_poblacion = total(hombre + mujer)
+
+gen prop_hombre = total_hombres / total_poblacion
+gen prop_mujer = total_mujeres / total_poblacion
+
+* 2. Proporción de individuos analfabetos, mayores a 15 años
+gen analfabeto = (ch09 == 2) // Asumiendo 2 = analfabeto
+gen mayores_15 = (ch06 > 15)
+
+by region: egen analfabeto_total = total(analfabeto * mayores_15)
+by region: egen total_mayores_15 = total(mayores_15)
+
+gen prop_analfabetos = analfabeto_total / total_mayores_15
+
+* 3. Proporción de jóvenes de 18 a 25 años que no estudian ni trabajan
+gen joven = (ch06 >= 18 & ch06 <= 25) // Jóvenes entre 18 y 25 años
+gen no_estudia_trabaja = (ch10 == 2 | ch10 == 3) // 2 = no asiste, 3 = nunca asistió
+
+// Filtrar por estado (solo contar jóvenes que están desocupados o inactivos)
+gen desocupado_o_inactivo = (estado == 2 | estado == 3) // 2 = desocupado, 3 = inactivo
+
+// Calcular total y jóvenes sin ocupación
+by region: egen joven_total = total(joven)
+by region: egen joven_sin_ocupacion = total(joven * no_estudia_trabaja * desocupado_o_inactivo)
+
+// Calcular proporción de jóvenes sin ocupación
+gen prop_jovenes_sin_ocupacion = joven_sin_ocupacion / joven_total
+
+* Alternativa con tabstat
+tabstat prop_hombre prop_mujer prop_analfabetos prop_jovenes_sin_ocupacion, by(region) statistics(mean)
