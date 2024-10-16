@@ -1,0 +1,887 @@
+*********************************
+*       Trabajo Práctico      *
+*       Desarrollo Económico  *
+*       Rodrigo Martin          *
+*            894110             *
+*********************************
+
+*Utilizo un directorio especifico para el TP
+cd"C:\Users\Rodrigo\Desktop\TPDesarrollo"
+*Importo base de INDEC
+set excelxlsxlargefile on
+
+import excel using "C:\Users\Rodrigo\Desktop\TPDesarrollo\usu_individual_T318..xls", clear firstrow sheet("Sheet 1") case(lower)
+
+*Guardo la base en formato .dta: 
+
+save "C:\Users\Rodrigo\Desktop\TPDesarrollo\usu_individual_T318..xls", replace
+
+cd "C:\Users\Rodrigo\Desktop\TPDesarrollo"
+******************
+*    Punto 1     *
+******************
+
+*Abro la base
+use "usu_individual_T318..xls", clear
+
+*"Pulo" la base
+
+destring deccfr, replace
+
+*La variable deccfr es el numero de decil del ingreso per capita familiar; el comando destring lo que hace es transformar una variable de formato texto a formato numerico
+
+drop if (deccfr < 1 | deccfr > 10)
+
+*Dado que 00 = sin ingresos, 12 = no respuesta, 13 = entrevista individual no realizada, todos estos datos los voy a quitar de la base para no tener empty values
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+*No voy a considerar el servicio domestico en hogares (51) ni los pensionistas en hogares (71)
+
+*Genero una variable de edad, el comando de edad en la encuesta del INDEC esta vinculada con el codigo ch06
+
+generate edad=ch06 
+
+replace edad = 0 if edad == -1  
+
+*Dado que el ejercicio me pide analizar unicamente los datos para los agentes entre 18  a 65 aÃ±os filtro la base con el siguiente comando 
+
+drop if edad < 18 | edad > 65
+
+*Aunque  ya  "limpie" la base, tambien debo no considerar los datos de aquellas personas que no respondieron (idem a lo realizado arriba), utilizando la variable estado
+
+drop if estado == 0 
+ 
+*Voy a etiquetar  la variable region con el comando label
+
+label define labelregion 1 "GBA" 40 "NOA" 41 "NEA" 42 "Cuyo" 43 "Pampeana" 44 "Patagonica"
+
+label values region labelregion 
+ 
+*Primero voy a construir una variable binaria para la poblacion economicamente activa (PEA), utilizando la variable estado, para constuir la tasa de actividad
+
+generate pea = .
+
+replace pea = 1 if (estado == 1 | estado == 2) 
+
+replace pea = 0 if (estado == 3)
+
+label var pea "1 si pertenece a la poblacion economicamente activa, 0 si no"
+ 
+bysort region: summarize pea [w=pondera] // se utiliza pondera porque no se estan utilizando las variables p21, p47r ni itf ni ipcf
+
+bysort region: tabulate pea [w=pondera] 
+
+*Luego creo una variable binaria para la poblacion ocupada; para construir la tasa de ocupados
+
+generate ocupados = .
+
+replace ocupados = 1 if (estado == 1) 
+
+replace ocupados = 0 if (estado == 2 | estado == 3) 
+
+label var ocupados "1 si pertenece a los ocupados, 0 si no"
+
+bysort region: tabulate ocupados [w=pondera] // se utiliza pondera porque no se estan utilizando las variables p21, p47r ni itf ni ipcf
+
+bysort region: summarize ocupados [w=pondera] 
+
+*Creo una variable binaria para la poblacion desocupada; para construir la tasa de desocupados
+
+generate desocupados = .
+
+replace desocupados = 1 if (estado == 2 & pea == 1) 
+
+replace desocupados = 0 if (estado == 1 | estado == 3) & pea == 1 
+
+label var desocupados "1 si pertenece a los desocupados, 0 si no"
+
+bysort region: tabulate desocupados [w=pondera] // se utiliza pondera porque no se estan utilizando las variables p21, p47r ni itf ni ipcf
+
+bysort region: summarize desocupados [w=pondera] 
+
+*Creo una variable binaria para la poblacion subocupada; utilizo la variable intensi (busco a los ocupados que son subocupados por insifuciencia horaria), lo uso para calcular la tasa de subocupados 
+
+generate subocupados = .
+
+replace subocupados = 1 if (pea == 1 & intensi == 1) 
+
+replace subocupados = 0 if pea == 1 & intensi >= 2
+
+label var subocupados "1 si pertenece a los subocupados, 0 si no"
+
+bysort region: tabulate subocupados [w=pondera] // se utiliza pondera porque no se estan utilizando las variables p21, p47r ni itf ni ipcf
+
+bysort region: summarize subocupados [w=pondera] 
+
+*********************************************
+*Punto 2 (histograma)                       *
+*********************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+*El comando para el ingreso per capita familiar es IPCF (Ingreso per capita familiar), vamos a obtener el 5% mas rico de la poblacion en la region
+
+bysort region: summarize ipcf [w=pondih], detail // se utiliza pondih porque se esta utilizando la variable ipcf
+
+generate lipcf = log(ipcf) //linealizo ipcf
+hist lipcf [w=pondih], normal //La opció® ®ormal me plotea una distribució® ®ormal sobre mi grâ§©co
+
+kdensity p47t if p47t > 0 [w=pondii] //Creo el kernel
+
+kdensity p47t if p47t > 0 & p47t < 31500 [w=pondii]
+
+kdensity lipcf [w=pondih]//creo el kernel para lipcf
+
+twoway (kdensity lipcf [w=pondih] if region==42)(kdensity lipcf [w=pondih] if region==01), legend(label(1 "CUYO") label(2 "CABA"))
+*Este grÃ¡fico es una forma suavizada del histograma convencional
+
+***********************************************************************************
+*Punto 2 b  curva de Pen y funcion de distribucion acumulada                      * 
+***********************************************************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+*Ordeno segun ipcf
+
+sort ipcf
+
+*En el eje vertical voy a armar la proporcion de personas segun su nivel de ingreso per capita familiar ponderada
+
+gen sumapob = sum(pondih) // se utiliza pondih porque se esta utilizando la variable ipcf
+
+*Para obtener el eje horizontal  divido la observacion que estemos analizando por la ultima observacion; al generar estos dos codigos armo un ratio que esta entre 0 y 1
+
+generate shrpob = sumapob/sumapob[_N]
+
+*Creo el share de la poblacion ordenada segun su nivel de ingreso; el valor para la observacion mas grande es igual a 1
+
+line shrpob ipcf if ipcf <= 31500 & region == 42, ylabel(0(0.1)1) xlabel(0(6300)31500)
+
+line shrpob ipcf if region == 42 //incluyo a  el 5% de la poblacion mas rica 
+
+*Para hacer la curva de Pen invierto los ejes (excluyendo a  el 5% de la poblacion) 
+
+line ipcf shrpob if ipcf <= 31500 & region == 42, ylabel(0(6300)31500) xlabel(0(0.1)1)
+
+*No saco a el 5% de la poblacion 
+
+line ipcf shrpob if region == 42
+
+
+************************************************
+*Punto 3 - Curva de Lorenz                     *
+************************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+sort region ipcf
+
+*Eje horizontal (poblacion acumulada segun nivel de ingresos)
+
+bysort region: generate sumapob = sum(pondih) // se utiliza pondih porque se esta utilizando la variable ipcf
+
+bysort region: generate shrpob = sumapob/sumapob[_N] 
+
+*Eje vertical (ingreso acumulado)
+
+bysort region: generate sumaing = sum(ipcf*pondih)
+
+bysort region: generate shring = sumaing/sumaing[_N] 
+
+*Realizo la curva de Lorenz para CUYO
+
+twoway (line shring shrpob if region == 42)(line shring shring), legend (label(1 "CL CUYO") label(2 "LPI"))
+
+*Ahora la comparo con la de GBA (REGION== 01) 
+
+twoway (line shring shrpob if region == 01)(line shring shrpob if region == 42)(line shring shring), legend(label(1 "CL GBA") label(2 "CL CUYO") label(3 "LPI"))
+
+
+*************************************************************
+*Punto 4  (Coeficiente de Gini para CUYO)                   *
+*************************************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores pero filtrando para CUYO
+
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+drop if region ! = 42 
+
+summarize ipcf [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+return list
+
+*Creo una macro para poder analizar el tamano de la fuente
+
+local N = r(sum_w) 
+
+*Otra para el ingreso medio
+
+local u = r(mean)
+
+*Ordeno segun ipcf
+
+sort ipcf
+
+*Computamos la suma acumulada del ponderador 
+
+generate suma = sum(pondih) if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+*Determino la ubicacion de cada individuo  de acuerdo a su ingreso 
+
+generate i = (2*suma-pondih+1)/2
+
+*Obtengo cada termino de la sumatoria 
+
+generate termino = ipcf*(`N'-i+1)
+
+*Hago la sumatoria y la almaceno en otra macro 
+
+summarize termino [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+local sumatoria = r(sum)
+
+*Computo el Gini para CUYO
+
+local Gini_CUYO = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_CUYO = `Gini_CUYO'"
+
+*************************************************************
+*Punto 4  -Coeficiente de Gini para GBA                     *
+*************************************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+drop if region ! = 01 
+
+summarize ipcf [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+return list
+
+*Almaceno el tamano de la muestra 
+
+local N = r(sum_w) 
+
+*Almaceno el ingreso medio
+
+local u = r(mean)
+
+*Ordeno por ipcf:
+
+sort ipcf
+
+*Realzo la suma acumulada del ponderador 
+
+generate suma = sum(pondih) if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+*Determino la ubicacion de cada individuo i de acuerdo a su ingreso  y realizo los mismos pasos que en el punto anterior
+
+generate i = (2*suma-pondih+1)/2
+ 
+generate termino = ipcf*(`N'-i+1)
+
+summarize termino [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+local sumatoria = r(sum)
+
+*Computo el Gini para GBA
+
+local Gini_GBA = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_GBA = `Gini_GBA'"
+
+*********************************************************************
+*Punto 5  (Coeficiente de Gini para CuYO, 3T2019)                   *
+*********************************************************************
+
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+set excelxlsxlargefile on
+
+import excel using "C:\Users\Rodrigo\Desktop\TPDesarrollo\Usu_individual_T319.xls", clear firstrow sheet("Sheet 1") case(lower)
+
+
+save "C:\Users\Rodrigo\Desktop\TPDesarrollo\Usu_individual_T319.xls", replace
+
+cd "C:\Users\Rodrigo\Desktop\TPDesarrollo"
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+drop if region ! = 42
+ 
+summarize ipcf [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+return list
+
+*Almaceno el tamaÃ±o de la muestra 
+
+local N = r(sum_w) 
+
+*Almaceno el ingreso medio
+
+local u = r(mean)
+
+*Ordeno segun ipcf:
+
+sort ipcf
+
+*Computo la suma acumulada del ponderador 
+
+generate suma = sum(pondih) if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+*Determino la ubicacion de cada individuo  de acuerdo a su ingreso y realizo los pasos de los puntos anteriores
+
+generate i = (2*suma-pondih+1)/2
+
+generate termino = ipcf*(`N'-i+1)
+
+summarize termino [w=pondih] if ipcf > 0  
+local sumatoria = r(sum)
+*Computo el Gini
+local Gini_CUYO = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_CUYO = `Gini_CUYO'"
+
+
+****************************************
+*Punto 6 Pobreza                       *
+****************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores pero sin eliminar ninguna region
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+*Creo una variable dummy para crear la linea de la Pobreza denominada (lidepo)
+
+generate lineadepo = .
+
+label var lineadepo "1 si se encuentra por debajo de la linea, 0 si no"
+
+replace lineadepo = 0 if ipcf > 3334
+
+replace lineadepo = 1 if ipcf <= 3334
+
+*Para poder determinar la proporcion de la poblacion considerada en la base de datos, para hacerlo usamos el comando tab y para ponderar el comando pondih
+
+tabulate lineadepo [w=pondih] // se utiliza pondih porque se esta utilizando la variable ipcf
+
+ 
+************************************
+*Punto 6, Nueva Linea de la Pobreza*
+************************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+generate lineadepo1 = .
+
+label var lineadepo1 "1 si se encuentra por debajo de la linea, 0 si no"
+
+replace lineadepo1 = 0 if ipcf > 3500.7
+
+replace lineadepo1 = 1 if ipcf <= 3500.7
+
+*Para poder determinar la proporcion de la poblacion considerada en la base de datos, para hacerlo usamos el comando tab y para ponderar el comando pondih
+
+tabulate lineadepo1 [w=pondih] 
+
+***********************************
+*Punto 7 (NBI)- Combinar las bases*
+***********************************
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+set excelxlsxlargefile on
+import excel using "C:\Users\Rodrigo\Escritorio\TPDesarrollo\usu_hogar_T318.xls", clear firstrow sheet("Sheet 1") case(lower)
+
+save "C:\Users\Rodrigo\Escritorio\TPDesarrollo\usu_hogar_T318.dta", replace
+
+cd "C:\Users\Rodrigo\Escritorio\TPDesarrollo"
+
+use "usu_hogar_T318.dta", clear
+
+sort codusu nro_hogar // Se usa la variable nro_hogar ya que  una vivienda puede tener mas de un hogar como un conventillo por ejemplo
+
+*Esta ordenada ascendemente por codusu 
+
+save "temporal.dta", replace 
+
+*Abro el master dataset
+
+use "usu_individual_T318..xls", clear
+
+*Ordeno con los indicadores planteados anteriormente
+sort codusu nro_hogar
+
+*Uno las bases con el comando merge:
+
+merge m:1 codusu nro_hogar using "temporal.dta" // Utilizamos como identificadores el codusu y el nro de hogar que son dos variables que estan en las dos bases 
+
+*Borro la base temporal 
+
+erase "temporal.dta"
+
+*Todas las observaciones fueron matcheadas.
+
+********************
+*Indicadores de NBI*
+********************
+ 
+*1) Hacinamiento: Hogares que tuvieran mas de 3 personas por cuarto, utilizamos el comando ix_tot: Cantidad de miembros del hogar
+
+
+bysort codusu nro_hogar: generate miembros = _N //Esto cuenta  la cantidad de observaciones del subgrupo (hogar) y pone el numero de la  ultima observacion 
+
+generate indicadora = 0 
+
+replace indicadora = 1 if (miembros / ii2) > 3 
+
+label var indicadora "1 si pertenece a la poblacion que posee mas de 3 personas por cuarto, 0 si no"
+
+tabulate indicadora [w=pondera] // se utiliza pondera porque no se estan utilizando ni las variables p21, p47r ni itf ni ipcf
+
+
+*********************************************************************************************************************************************************
+
+*2) Vivienda: personas que habitan en una vivienda de tipo inconveniento (pieza de inquilino, vivienda precaria u otro tipo)
+
+generate indicadorb = 0 //Genero la variable dummy al que voy a denominar como segundo indicador
+
+replace indicadorb = 1 if iv1 == 3 | iv1 == 4 | iv1 == 5 | iv1 == 6 |  iv12_3 == 1 //Voy a considerar que se cumple con este NBI si el agente vive en una villa de emergencia (por obs del encuestador) o si el tipo de vivienda no es ni una casa o depeartamento (tambien por observacion)
+
+label var indicadorb "1 si pertenece a la poblacion que vive en un hogar del tipo inconveniente, 0 si no"
+
+tabulate indicadorb [w=pondera]
+**********************************************************************************************************************************************************
+
+*3)Condiciones sanitarias: hogares que no tuvieran ningun tipo de retrete 
+
+generate indicadorc = 0 
+
+replace indicadorc = 1 if iv8 == 2 | iv10 == 3 //Para que no tenga esa necesidad basica satisfecha no debe tener bano letrina o debe tener una letrina
+
+label var indicadorc "1 si pertenece a la poblacion que vive en un hogar que no posea retrete, 0 si no"
+
+tabulate indicadorc [w=pondera] 
+
+*4) Asistencia escolar: la persona va a tener esa necesidad insatisfecha si vive en un hogar con algun un niñ¯ ¥n edad escolar no asiste a la escuela (Esta necesidad insatisfecha se la asigna a todo miembro del hogar no solo al niñ¯ ±ue no asiste a la escuela). Voy a computar a todos los miembros del hogar que no van a la escuela
+* Utilizo la funcion sum del comando egen, haciendo previamente un bysort
+*En primer lugar identifico a los ninos que estan en edad escolar y  que no asisten a la ecuela
+
+generate nbiae = 0 
+
+replace nbiae = 1 if (ch06 >= 6 & ch06 <= 12) & (ch10 == 2 | ch10 == 3) 
+
+*Le asigno a todos los miembros del hogar la cantidad de chicos en edad escolar que no asisten a la escuelaa 
+
+bysort codusu nro_hogar: egen aux = sum(nbiae), missing 
+*Computo el indicador
+
+generate indicadord = 0 //Genero el indicador 4, indicador vinculado a la asistencia escolar (buscamos ver que proporcion de la poblacion satisface esa condicion)
+
+replace indicadord = 1 if aux != 0 //La reemplazo por 1 si la variable auxiliar (que me dice cuantos niñ¯³ hay en el hogar que no van al colegio) es distinto 0, eso es en el caso que haya uno o mas niñ¯³
+
+drop nbiae aux //Dropeo las variables auxiliares y tengo mi indicador
+
+tabulate indicadord [w=pondera] 
+
+*5) Capacidad de subsistencia: el agente va a tener esa necesidad insatisfecha si vive en un hogar que tuvieran 4 o mas personas por miembro ocupado y, ademas, cuyo jefe tuviera baja educacion.
+
+*Hay que identificar a los ocupados, computar la cantidad de ocupados por hogar, a partir de estos dos primeros voy a ser capaz de hacer el ratio (miembros sobre ocupados) seria la primera parte de capacidad de subsistencia
+
+*2da parte: usar la baja educacion del jefe como aproximador para un nivel de ingresos que no va alcanzar para mantener a tantos miembros por ocupado (es un proxy imperfecto pero con un margen de error demasiado insignificante)
+
+generate ocupado = 0
+
+replace ocupado = 1 if estado == 1 // Creo la primera variable auxiliar
+bysort codusu nro_hogar: egen ocupados = sum(ocupado) // Busco conocer la cantidad de personas  ocupadas
+
+generate jefe = 0 // Creo la segunda variable auxiliar
+replace jefe = 1 if ch03 == 1 & (nivel_ed == 1 | nivel_ed ==7) //Tengo en cuenta a las personas jefes y jefas de hogar y ademas que poseen bajo nivel educativo 
+
+bysort codusu nro_hogar: egen jefesdbe = sum(jefe) //Queremos determinar cuales son los agentes que viven en un hogar donde el jefe de hogar posee baja educacion (que van a ser aquellos que no terminaron el nivel primario o sin instruccion)
+
+gen indicadore = 0 /
+replace indicadore = 1 if ( (miembros/ocupados) > 4 ) & jefesdbe == 1 //Las observaciones van a ser iguales a 1 si viven en un hogar con mas de 4 personas y ademas el jefe de hogar de ese hogar posee baja educacion 
+
+tabulate indicadore [w=pondera] 
+****************************************************************************************************************************************************************************************************************************************************************
+*Variable de interseccion
+
+generate vinterseccion = 0
+
+replace vinterseccion = 1 if (indicadora == 1 & indicadorb == 1 & indicadorc == 1 & indicadord == 1 & indicadore == 1) 
+
+tabulate vinterseccion [w=pondera] 
+***************************************************************************************************************************************************************************************************************************************************************
+*Variable de union
+
+generate vunion = 0
+
+replace vunion = 1 if (indicadora == 1 | indicadorb == 1 | indicadorc == 1 | indicadord == 1 | indicadore == 1) 
+
+tabulate vbeunion [w=pondera] 
+***************************************************************************************************************************************************************************************************************************************************************
+*Variable de inventario 
+
+generate vinventario = 0
+
+replace vinventario = indicadora + indicadorb + indicadorc + indicadord + indicadore 
+
+tabulate vbeinventario [w=pondera] 
+**************************************************************************************************************************************************************************************************************************************************************
+*Punto 9 TP (regresiones)*
+**************************
+
+*Voy a instalar un comando para poder exportar las regresiones a excel 
+
+ssc install outreg2
+
+*Realizo el mismo procedimiento que en puntos anteriores
+
+use "usu_individual_T318..xls", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+
+*Horas de trabajo semanales de la ultima semana
+
+replace pp3e_tot = . if pp3e_tot == 999 //El valor 999 para esta variable corresponde a la no respuesta 
+
+replace pp3e_tot = 0 if pp3e_tot < 0  //Aquellos que tengan un valor menor a 0 
+
+generate horas = pp3e_tot * 4.2 
+
+*Ingreso laboral 
+
+replace p21 = 0 if p21 < 0 //Dado que el valor de no respuesta para la variable p21 es -9 elimino los valores negativos
+
+generate inglab = p21 
+
+*Ingreso laboral horario, hago el ratio del ingreso por hora (como los datos del ingreso son mensuales pasamos las horas trabajadas a mensuales tambien)
+
+generate ingxhora = inglab / horas //Ratio del ingreso del mes dividido las horas del mes para obtener el ingreso por hora
+
+*En logaritmos 
+
+generate lingxhora = log(ingxhora) 
+
+label var lingxhora "Logaritmo del ingreso laboral horario"
+
+**Educacion 
+
+*Genero cada una de las variables dummys
+
+generate priin = 0 
+
+label var priin "Nivel primario incompleto"
+
+generate pric = 0 
+ 
+label var pric "Nivel primario completo" 
+
+generate secin = 0 
+
+label var secin "Nivel secundario incompleto"
+
+generate secc = 0 
+
+label var secc "Nivel secundario completo" 
+
+generate supin = 0 
+
+label var supin "Nivel superior incompleto" 
+
+generate supc = 0 
+
+label var supc "Nivel superior completo"
+
+replace priin = 1 if nivel_ed == 1 | nivel_ed == 7
+ 
+replace pric = 1 if nivel_ed == 2 
+
+replace secin = 1 if nivel_ed == 3  
+
+replace secc = 1 if nivel_ed == 4 
+
+replace supin = 1 if nivel_ed == 5 
+
+replace supc = 1 if nivel_ed == 6 
+
+
+*Nivel educativo: a de educacion (generar una variable que diga cuantos anos asistio a una institucion academica)
+
+destring ch14, replace 
+
+generate anedu = .  
+
+label var anedu "A de educacion"
+
+*Sin primario.
+
+replace anedu = 0 if ch10 == 3 
+
+replace anedu = 0 if ch12 == 0 | ch12 == 1 // Tampoco se van a considerar añ¯³ de educacion (Es decir 0 añ¯³© si el nivel mas alto que se cursa o se curo es el jardin/preescolar
+
+*En el nivel primario se va a considerar unicamente 7 ano de educacion
+
+replace anedu = 0 if ch12 == 2 & ch13 == 2 & ch14 == 0 
+replace anedu = 1 if ch12 == 2 & ch13 == 2 & ch14 == 1 
+replace anedu = 2 if ch12 == 2 & ch13 == 2 & ch14 == 2 
+replace anedu = 3 if ch12 == 2 & ch13 == 2 & ch14 == 3 
+replace anedu = 4 if ch12 == 2 & ch13 == 2 & ch14 == 4 
+replace anedu = 5 if ch12 == 2 & ch13 == 2 & ch14 == 5 
+replace anedu = 6 if ch12 == 2 & ch13 == 2 & ch14 == 6 
+replace anedu = 7 if ch12 == 2 & ch13 == 2 & ch14 == 7 
+replace anedu = 7 if ch12 == 2 & ch13 == 1 
+
+tab ch14 if ch12 == 2 & ch13 == 2 [w=pondera] // se utiliza pondera porque no se estan utilizando ni las variables p21, p47r ni itf ni ipcf. Observamos la frecuencia para aquellos que no completaron primaria para determinar la moda
+
+replace anedu = 2 if ch12 == 2 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) 
+
+*Para la educacion general basica voy a considerar 9 anos de educacion 
+
+replace anedu = 0 if ch12 == 3 & ch13 == 2 & ch14 == 0 
+replace anedu = 1 if ch12 == 3 & ch13 == 2 & ch14 == 1 
+replace anedu = 2 if ch12 == 3 & ch13 == 2 & ch14 == 2 
+replace anedu = 3 if ch12 == 3 & ch13 == 2 & ch14 == 3 
+replace anedu = 4 if ch12 == 3 & ch13 == 2 & ch14 == 4 
+replace anedu = 5 if ch12 == 3 & ch13 == 2 & ch14 == 5 
+replace anedu = 6 if ch12 == 3 & ch13 == 2 & ch14 == 6 
+replace anedu = 7 if ch12 == 3 & ch13 == 2 & ch14 == 7 
+replace anedu = 8 if ch12 == 3 & ch13 == 2 & ch14 == 8 
+replace anedu = 9 if ch12 == 3 & ch13 == 2 & ch14 == 9 
+replace anedu = 9 if ch12 == 3 & ch13 == 1 
+
+tab ch14 if ch12 == 3 & ch13 == 2 [w=pondera] 
+replace anedu = 8 if ch12 == 3 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98)  
+*Para la secundaria voy  a considerar 5 añ¯³ de educacion. 
+replace anedu = 7 if ch12 == 4 & ch13 == 2 & ch14 == 0 
+replace anedu = 8 if ch12 == 4 & ch13 == 2 & ch14 == 1 
+replace anedu = 9 if ch12 == 4 & ch13 == 2 & ch14 == 2 
+replace anedu = 10 if ch12 == 4 & ch13 == 2 & ch14 == 3
+replace anedu = 11 if ch12 == 4 & ch13 == 2 & ch14 == 4
+replace anedu = 12 if ch12 == 4 & ch13 == 2 & ch14 == 5
+replace anedu = 12 if ch12 == 4 & ch13 == 2 & ch14 == 6
+replace anedu = 12 if ch12 == 4 & ch13 == 1  
+
+tab ch14 if ch12 == 4 & ch13 == 2 [w=pondera] 
+
+replace anedu = 9 if ch12 == 4 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) 
+
+* 
+*Para el polimodal voy a considerar 3 anos de duracion
+
+replace anedu = 9 if ch12 == 5 & ch13 == 2 & ch14 == 0 
+replace anedu = 10 if ch12 == 5 & ch13 == 2 & ch14 == 1 
+replace anedu = 11 if ch12 == 5 & ch13 == 2 & ch14 == 2 
+replace anedu = 12 if ch12 == 5 & ch13 == 2 & ch14 == 3 
+replace anedu = 12 if ch12 == 5 & ch13 == 1 
+tab ch14 if ch12 == 5 & ch13 == 2 [w=pondera] 
+replace anedu = 11 if ch12 == 5 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) 
+
+*Para el terciario se voy a considerar 3 añ¯³ de duracion dario para ambos (aedu=12)
+
+replace anedu = 12 if ch12 == 6 & ch13 == 2 & ch14 == 0
+replace anedu = 13 if ch12 == 6 & ch13 == 2 & ch14 == 1
+replace anedu = 14 if ch12 == 6 & ch13 == 2 & ch14 == 2
+replace anedu = 15 if ch12 == 6 & ch13 == 2 & (ch14 == 3 | ch14 == 4 | ch14 == 5| ch14 == 8| ch14 == 9) 
+replace anedu = 15 if ch12 == 6 & ch13 == 1 
+
+tab ch14 if ch12 == 6 & ch13 == 2 [w=pondera] 
+replace anedu = 14 if ch12 == 6 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) 
+
+*Para el uiversitario voy a tener en cuenta 5 anos de duracion
+
+replace anedu = 12 if ch12 == 7 & ch13 == 2 & ch14 == 0 
+replace anedu = 13 if ch12 == 7 & ch13 == 2 & ch14 == 1 
+replace anedu = 14 if ch12 == 7 & ch13 == 2 & ch14 == 2 
+replace anedu = 15 if ch12 == 7 & ch13 == 2 & ch14 == 3 
+replace anedu = 16 if ch12 == 7 & ch13 == 2 & ch14 == 4 
+replace anedu = 17 if ch12 == 7 & ch13 == 2 & (ch14 == 5 | ch14 == 6) 
+replace anedu = 17 if ch12 == 7 & ch13 == 1 
+
+tab ch14 if ch12 == 7 & ch13 == 2 [w=pondera]
+replace anedu = 15 if ch12 == 7 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) 
+
+*Para el posgrado voy a considerar unicamente 2 anos de educacion
+
+replace anedu = 17 if ch12 == 8 & ch13 == 2 & ch14 == 0 
+replace anedu = 18 if ch12 == 8 & ch13 == 2 & ch14 == 1 
+replace anedu = 19 if ch12 == 8 & ch13 == 2 & (ch14 == 2 | ch14 == 3 | ch14 == 4)
+replace anedu = 19 if ch12 == 8 & ch13 == 1
+tab ch14 if ch12 == 8 & ch13 == 2 [w=pondera] 
+replace anedu = 17 if ch12 == 8 & ch13 == 2 & (ch14 == . | ch14 == 99 | ch14 == 98) //Dado que la moda dio el que no finalizan el primer añ¯ ¤el posgrado (lo reemplazamos por 17 porque es 17+0), vamos a reemplazar dicho valor a aquellos que no respondieron cual fue su ultimo añ¯ ¯ que hayan tenido una educacion especial 
+ 
+*Creo variable de edad 
+
+generate edad = ch06
+
+label var edad "Edad"
+*Experiencia potencial
+
+generate exper = edad - anedu - 6 
+
+replace exper = 0 if exper < 0
+
+label var exper "Experiencia potencial"
+
+*Dos variables que van a ser utiles para la regresion son: edad2 y exper2 que simplemente es la edad al cuadrado y la experiencia al cuadrado
+
+generate exper2 = exper*exper
+
+label var exper2 "Experiencia potencial al cuadrado" 
+
+generate edad2 = edad*edad
+
+label var edad2 "Edad al cuadrado"
+*Creo la variable dicotomica de genero
+generate hombre = 0 if ch04 == 2
+
+replace hombre = 1 if ch04 == 1 
+
+*Modelo 1: Para incorporar la educació® £omo variable independiente, considerar la variable aedu. Ademâ³¬ Utilizar la experiencia.
+
+regress lingxhora anedu exper exper2 hombre if inglab > 0 [w=pondiio] //Utilizo pondiio porque utilizo el ingreso de la ocupacion principal
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones.xls, replace label
+
+regress lingxhora anedu edad edad2 hombre if inglab > 0 [w=pondiio]
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones1.xls, replace label
+
+
+*Modelo 2: Para incorporar la educació® £omo variable independiente, considerar las dummies por nivel de educació®® Ademâ³¬ Utilizar la experiencia.
+
+regress lingxhora pric secin secc supin supc exper exper2 hombre if inglab > 0 [w=pondiio] //Utilizo pondiio porque utilizo el ingreso de la ocupacion principal
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones2.xls, replace label
+
+regress lingxhora pric secin secc supin supc edad edad2 hombre if inglab > 0 [w=pondiio] //Utilizo pondiio porque utilizo el ingreso de la ocupacion principal
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones3.xls, replace label
+
+*******************************
+*Punto 10 (nuevas regresiones)*
+*******************************
+
+******************
+*Regresion genero*
+******************
+
+generate hombre = 0 if ch04 == 2
+
+replace hombre = 1 if ch04 == 1 //La variable dummy va a tomar valor 1 si es hombre y 0 si es mujer
+
+regress lingxhora pric secin secc supin supc exper exper2 hombre if inglab > 0 [w=pondiio]
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones4.xls, replace label
+
+******************************
+*Regresion empleados publicos*
+******************************
+
+generate publicos = . 
+replace publicos = 1 if pp04a == 1 
+replace publicos = 0 if pp04a == 2 | pp04a == 3 
+
+label var publicos "Empleados publicos"
+
+*Los individuos que trabajan en una institució® ¥statal tienen salarios mayores, ceteris paribus.
+
+regress lingxhora pric secin secc supi supc exper exper2 publicos if inglab > 0 [w=pondiio] //Utilizo pondiio porque utilizo el ingreso de la ocupacion principal
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones6.xls, replace label
+
+*******************
+*Regresion soltero*
+*******************
+
+gen soltero = . 
+replace soltero = 1 if ch07 == 5 //Aquellos agentes que sean solteros va a tener valor 1 para la variable binaria soltero 
+
+replace soltero = 0 if ch07 == 1 | ch07 == 2 | ch07 == 3 | ch07 == 4 //Aquellos agentes que esten unidos, casados, separados o di vorciados, viudos van a tener valor 0
+
+*Los individuos solteros tienen salarios mayores, ceteris paribus
+
+regress lingxhora pric secin secc supin supc exper exper2 soltero if inglab > 0 [w=pondiio] //Utilizo pondiio porque utilizo el ingreso de la ocupacion principal
+
+*Exportamos la regresion 
+
+outreg2 using Regresiones7.xls, replace label
