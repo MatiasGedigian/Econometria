@@ -78,3 +78,35 @@ gen prop_jovenes_sin_ocupacion = joven_sin_ocupacion / joven_total
 
 * Alternativa con tabstat
 tabstat prop_hombre prop_mujer prop_analfabetos prop_jovenes_sin_ocupacion, by(region) statistics(mean)
+
+
+* Punto 2
+
+* Crear variable binaria para la Población Económicamente Activa (PEA)
+generate pea = (estado == 1 | estado == 2) // 1 = ocupado, 2 = desocupado
+
+* Calcular total de la población de 18 a 65 años ponderada
+bysort region: egen total_poblacion_18_65 = total(pondera) // Total ponderado de la población entre 18 y 65 años
+
+* Calcular totales ponderados de PEA
+bysort region: egen total_pea = total(pea * pondera) // Total PEA ponderado
+
+* Crear variable binaria para la población ocupada
+generate ocupados = (estado == 1) // 1 = ocupado
+
+* Calcular total de ocupados ponderados
+bysort region: egen total_ocupados = total(ocupados * pondera)
+
+* Calcular total de desocupados
+generate desocupados = (estado == 2 & pea == 1) // 1 = desocupado, solo si es PEA
+bysort region: egen total_desocupados = total(desocupados * pondera)
+
+* Calcular tasas usando la población total de 18 a 65 años
+gen tasa_actividad = (total_pea / total_poblacion_18_65) * 100 // Tasa de actividad
+gen tasa_empleo = (total_ocupados / total_poblacion_18_65) * 100 // Tasa de empleo
+gen tasa_desempleo = (total_desocupados / total_pea) * 100 // Tasa de desempleo
+
+* Crear tabla con resultados finales utilizando tabstat
+tabstat tasa_actividad tasa_empleo tasa_desempleo, by(region) statistics(mean)
+
+* Comentar los resultados obtenidos
