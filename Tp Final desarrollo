@@ -1,0 +1,298 @@
+set excelxlsxlargefile on
+
+* Importar Excel
+import excel using "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx\usu_individual_T124.xlsx", clear firstrow sheet("usu_individual_T124") case(lower)
+
+*formato .dta
+save "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx\usu_individual_T124.dta", replace
+
+cd "C:\Users\matia\Desktop\EPH_usu_1er_Trim_2024_xlsx"
+
+*Limpiamos la base
+
+destring deccfr, replace
+
+*La variable deccfr = Decil de ingreso
+
+drop if (deccfr < 1 | deccfr > 10)
+
+*00 = sin ingresos, 12 = no respuesta, 13 = entrevista individual no realizada, por ende lo eliminamos
+
+
+
+*Edad por ch06
+
+generate edad=ch06 
+
+replace edad = 0 if edad == -1  
+
+*Sacamos a las personas que no respondieron
+
+drop if estado == 0 
+ 
+*Etiquetamos las regiones
+
+label define labelregion 1 "GBA" 40 "NOA" 41 "NEA" 42 "Cuyo" 43 "Pampeana" 44 "Patagonica"
+
+label values region labelregion 
+
+* Reordenamos los datos por region
+sort region
+
+* 1. Proporción de hombres y mujeres
+gen hombre = (ch04 == 1) // Asumiendo 1 = varón
+gen mujer = (ch04 == 2) // Asumiendo 2 = mujer
+
+* Calcular proporciones por región
+by region: egen total_hombres = total(hombre)
+by region: egen total_mujeres = total(mujer)
+by region: egen total_poblacion = total(hombre + mujer)
+
+gen prop_hombre = total_hombres / total_poblacion
+gen prop_mujer = total_mujeres / total_poblacion
+
+* 2. Proporción de individuos analfabetos, mayores a 15 años
+gen analfabeto = (ch09 == 2) // Asumiendo 2 = analfabeto
+gen mayores_15 = (ch06 > 15)
+
+by region: egen analfabeto_total = total(analfabeto * mayores_15)
+by region: egen total_mayores_15 = total(mayores_15)
+
+gen prop_analfabetos = analfabeto_total / total_mayores_15
+
+* 3. Proporción de jóvenes de 18 a 25 años que no estudian ni trabajan
+gen joven = (ch06 >= 18 & ch06 <= 25) // Jóvenes entre 18 y 25 años
+gen no_estudia_trabaja = (ch10 == 2 | ch10 == 3) // 2 = no asiste, 3 = nunca asistió
+
+// Filtrar por estado (solo contar jóvenes que están desocupados o inactivos)
+gen desocupado_o_inactivo = (estado == 2 | estado == 3) // 2 = desocupado, 3 = inactivo
+
+// Calcular total y jóvenes sin ocupación
+by region: egen joven_total = total(joven)
+by region: egen joven_sin_ocupacion = total(joven * no_estudia_trabaja * desocupado_o_inactivo)
+
+// Calcular proporción de jóvenes sin ocupación
+gen prop_jovenes_sin_ocupacion = joven_sin_ocupacion / joven_total
+
+* Creamos la tabla
+tabstat prop_hombre prop_mujer prop_analfabetos prop_jovenes_sin_ocupacion, by(region) statistics(mean)
+
+
+* Punto 2
+
+* Armamos la PEA de forma binaria
+generate pea = (estado == 1 | estado == 2) // 1 = ocupado, 2 = desocupado
+
+* Calcular total de la población de 18 a 65 años ponderada
+bysort region: egen total_poblacion_18_65 = total(pondera) // Total ponderado de la población entre 18 y 65 años
+
+* Calcular totales ponderados de PEA
+bysort region: egen total_pea = total(pea * pondera) // Total PEA ponderado
+
+* Crear variable binaria para la población ocupada
+generate ocupados = (estado == 1) // 1 = ocupado
+
+* Calcular total de ocupados ponderados
+bysort region: egen total_ocupados = total(ocupados * pondera)
+
+* Calcular total de desocupados
+generate desocupados = (estado == 2 & pea == 1) // 1 = desocupado, solo si es PEA
+bysort region: egen total_desocupados = total(desocupados * pondera)
+
+* Calcular tasas usando la población total de 18 a 65 años
+gen tasa_actividad = (total_pea / total_poblacion_18_65) * 100 // Tasa de actividad
+gen tasa_empleo = (total_ocupados / total_poblacion_18_65) * 100 // Tasa de empleo
+gen tasa_desempleo = (total_desocupados / total_pea) * 100 // Tasa de desempleo
+
+* Crear tabla con resultados finales utilizando tabstat
+tabstat tasa_actividad tasa_empleo tasa_desempleo, by(region) statistics(mean)
+
+* Anexo Punto 3
+
+
+*Vemos el ingreso per capita ponderado
+
+bysort region: summarize ipcf [w=pondih], detail 
+
+generate lipcf = log(ipcf) //aplicamos logaritmo
+hist lipcf [w=pondih], normal 
+
+kdensity p47t if p47t > 0 [w=pondii] //Kernel para la distribucion
+
+kdensity p47t if p47t > 0 & p47t < 5450000 [w=pondii]
+
+kdensity lipcf [w=pondih] 
+
+twoway (kdensity lipcf [w=pondih] if region==42)(kdensity lipcf [w=pondih] if region==01), legend(label(1 "CUYO") label(2 "CABA"))
+*Histograma
+
+*Punto 3
+
+use "usu_individual_T124.dta", clear
+
+destring deccfr, replace
+
+drop if (deccfr < 1 | deccfr > 10)
+
+drop if (nro_hogar == 51 | nro_hogar == 71)
+
+*Ordenamos segun el ipcf
+
+sort ipcf
+
+gen sumapob = sum(pondih) //Eje vertical
+
+*Eje horizontal
+
+generate shrpob = sumapob/sumapob[_N]
+
+
+line shrpob ipcf if ipcf <=  545000 & region == 42, ylabel(0(0.1)1) xlabel(0(100000)545000) // Sacamos al 5% mas rico
+
+line shrpob ipcf if region == 42 
+
+*Hacemos la curva de Pen y sacamos al 5%
+
+line ipcf shrpob if ipcf <= 545000 & region == 42, ylabel(0(100000)545000) xlabel(0(0.1)1)
+
+*No saco a el 5% de la poblacion 
+
+line ipcf shrpob if region == 42
+
+
+*Punto 4 - Curva de Lorenz                     
+
+sort region ipcf
+
+*Eje horizontal para la poblacion por ingreso
+
+bysort region: generate sumapob = sum(pondih) 
+
+bysort region: generate shrpob = sumapob/sumapob[_N] 
+
+*Eje vertical (ingreso acumulado)
+
+bysort region: generate sumaing = sum(ipcf*pondih)
+
+bysort region: generate shring = sumaing/sumaing[_N] 
+
+*Curva de Lorenz Para CUYO
+
+twoway (line shring shrpob if region == 42)(line shring shring), legend (label(1 "CL CUYO") label(2 "LPI"))
+
+*A la curva de Lorenz previa le sumamos GBA y Pampeana 
+
+twoway (line shring shrpob if region == 01)(line shring shrpob if region == 42)(line shring shrpob if region == 43)(line shring shring), legend(label(1 "CL GBA") label(2 "CL CUYO") label(3 "CL Pampeana") label(4 "LPI"))
+
+
+
+*Punto 5  GINI - CUYO                 
+
+drop if region ! = 42 
+
+summarize ipcf [w=pondih] if ipcf > 0 
+
+return list
+
+local N = r(sum_w) 
+
+*Otra para el ingreso medio
+
+local u = r(mean)
+
+*Ordeno segun ipcf
+
+sort ipcf
+
+*Computamos la suma acumulada del ponderador 
+
+generate suma = sum(pondih) if ipcf > 0 
+
+*Ubicamos a cada persona segun su ingreso
+
+generate i = (2*suma-pondih+1)/2
+
+*Obtengo cada termino de la sumatoria 
+
+generate termino = ipcf*(`N'-i+1)
+
+
+summarize termino [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+local sumatoria = r(sum)
+
+*Calculamos el Gini Para Cuyo
+
+local Gini_CUYO = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_CUYO = `Gini_CUYO'"
+
+*************GINI GBA************
+
+// Realizamos lo mismo que antes pero para GBA
+
+drop if region ! = 01 
+
+summarize ipcf [w=pondih] if ipcf > 0
+
+return list
+
+local N = r(sum_w) 
+
+*Almaceno el ingreso medio
+
+local u = r(mean)
+
+*Ordeno por ipcf:
+
+sort ipcf
+
+
+generate suma = sum(pondih) if ipcf > 0 
+
+
+generate i = (2*suma-pondih+1)/2
+ 
+generate termino = ipcf*(`N'-i+1)
+
+summarize termino [w=pondih] if ipcf > 0 
+
+local sumatoria = r(sum)
+
+
+local Gini_GBA = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_GBA = `Gini_GBA'"
+
+
+*********************Gini Pampeana*********************
+
+// Realizamos lo mismo que antes pero para la region Pampeana
+
+drop if region ! = 43 
+
+summarize ipcf [w=pondih] if ipcf > 0
+
+return list
+
+local N = r(sum_w) 
+
+local u = r(mean)
+
+sort ipcf
+
+generate suma = sum(pondih) if ipcf > 0 
+
+generate i = (2*suma-pondih+1)/2
+ 
+generate termino = ipcf*(`N'-i+1)
+
+summarize termino [w=pondih] if ipcf > 0 // se utiliza pondih porque se esta utilizando la variable ipcf
+
+local sumatoria = r(sum)
+
+*Computo el Gini para GBA
+
+local Gini_GBA = 1+(1/`N')-(2/(`u'*`N'^2))*`sumatoria' 
+
+display "Gini_Pampeana = `Gini_Pampeana'"
